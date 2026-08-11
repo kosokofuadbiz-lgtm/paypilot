@@ -80,7 +80,7 @@ export default function ProfilePage() {
       // Refresh the profile in AuthContext so all components see the new data
       await refreshProfile();
 
-      setSuccessMsg('Profile and Bank Details updated successfully in Supabase!');
+      setSuccessMsg('Profile saved successfully!');
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to update profile.');
     } finally {

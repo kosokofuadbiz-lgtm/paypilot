@@ -40,7 +40,8 @@ export async function GET(req: Request) {
 
 export async function PUT(req: Request) {
   try {
-    const { userId, ...data } = await req.json();
+    const body = await req.json();
+    const { userId, ...data } = body;
 
     if (!userId) {
       return NextResponse.json({ error: 'userId required' }, { status: 400 });
@@ -58,16 +59,33 @@ export async function PUT(req: Request) {
 
     const adminSupabase = createClient(supabaseUrl, serviceKey);
 
+    const { data: existingProfile, error: fetchError } = await adminSupabase
+      .from('profiles')
+      .select('email')
+      .eq('id', userId)
+      .single();
+
+    if (fetchError || !existingProfile?.email) {
+      return NextResponse.json(
+        { error: 'Profile not found or email is missing. Please recreate the user profile.' },
+        { status: 400 }
+      );
+    }
+
+    const email = String(existingProfile.email).trim();
+
+    if (!email) {
+      return NextResponse.json({ error: 'Profile email cannot be empty' }, { status: 400 });
+    }
+
     const { data: updated, error } = await adminSupabase
       .from('profiles')
-      .upsert(
-        {
-          id: userId,
-          ...data,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'id' }
-      )
+      .update({
+        ...data,
+        email,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId)
       .select()
       .single();
 
