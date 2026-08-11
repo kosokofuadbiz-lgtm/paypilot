@@ -41,7 +41,8 @@ export default function SignupPage() {
     setLoading(true);
     const supabase = createClient();
 
-    const { data, error } = await supabase.auth.signUp({
+    // 1. Sign up user via Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -51,23 +52,40 @@ export default function SignupPage() {
       },
     });
 
-    if (error) {
-      setErrorMsg(error.message || 'Failed to create account.');
-    } else {
-      if (data?.user) {
-        // Use server-side API route (service role key) to reliably create
-        // profile + wallet rows, bypassing Supabase RLS policies.
-        await fetch('/api/auth/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: data.user.id,
-            email,
-            fullName,
-          }),
-        });
+    if (authError) {
+      setErrorMsg(`Supabase Auth error: ${authError.message || 'Database error saving new user'}`);
+      setLoading(false);
+      return;
+    }
+
+    if (!authData?.user) {
+      setErrorMsg('No user object was returned by Supabase Auth.');
+      setLoading(false);
+      return;
+    }
+
+    // 2. Create Profile and Wallet in Supabase DB via Service Role API
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: authData.user.id,
+          email,
+          fullName,
+        }),
+      });
+
+      const resData = await res.json();
+      if (!res.ok || resData.error) {
+        throw new Error(resData.error || 'Server profile creation failed.');
       }
+
       setSuccessType('created');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to complete user setup in database.');
+    } finally {
+      setLoading(false);
     }
   };
 

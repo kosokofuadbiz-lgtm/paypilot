@@ -38,14 +38,11 @@ export default function TransactionDetailPage() {
         if (data && !data.error) {
           setEscrow(data);
         } else {
-          // Fallback to local mock store
-          const local = mockStore.getEscrowById(id);
-          setEscrow(local || null);
+          setEscrow(null);
         }
       })
       .catch(() => {
-        const local = mockStore.getEscrowById(id);
-        setEscrow(local || null);
+        setEscrow(null);
       })
       .finally(() => setLoading(false));
   }, [id, tick]);

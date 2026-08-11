@@ -34,11 +34,11 @@ export default function TransactionsListPage() {
         if (Array.isArray(data)) {
           setEscrows(data);
         } else {
-          setEscrows(mockStore.getEscrowTransactions(user.id));
+          setEscrows([]);
         }
       })
       .catch(() => {
-        setEscrows(mockStore.getEscrowTransactions(user.id));
+        setEscrows([]);
       })
       .finally(() => setLoading(false));
   }, [user?.id]);

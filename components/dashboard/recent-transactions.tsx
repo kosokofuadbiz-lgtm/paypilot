@@ -27,11 +27,11 @@ export function RecentTransactions() {
         if (Array.isArray(data)) {
           setEscrows(data.slice(0, 5));
         } else {
-          setEscrows(mockStore.getEscrowTransactions(user.id).slice(0, 5));
+          setEscrows([]);
         }
       })
       .catch(() => {
-        setEscrows(mockStore.getEscrowTransactions(user.id).slice(0, 5));
+        setEscrows([]);
       })
       .finally(() => setLoading(false));
   }, [user?.id]);

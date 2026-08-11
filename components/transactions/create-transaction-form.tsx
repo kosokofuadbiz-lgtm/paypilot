@@ -158,32 +158,8 @@ export function CreateTransactionForm() {
 
       const data = await response.json();
 
-      if (!response.ok) {
+      if (!response.ok || !data.id) {
         throw new Error(data.error || 'Failed to create escrow transaction.');
-      }
-
-      // Sync into browser localStorage mockStore as immediate client fallback
-      try {
-        mockStore.addOrUpdateEscrow({
-          id: data.id,
-          title: data.title || title,
-          description: data.description || description,
-          amount: data.amount || parsedAmount,
-          fee: data.fee || fee,
-          buyer_id: user.id,
-          seller_id: lookupResult.user_id,
-          buyer_name: profile?.full_name || user?.user_metadata?.full_name || 'Buyer',
-          seller_name: lookupResult.full_name || 'Receiver',
-          buyer_email: profile?.email || user?.email || '',
-          seller_email: '',
-          status: data.status || 'funded',
-          item_category: category,
-          inspection_period_days: parseInt(inspectionDays),
-          created_at: data.created_at || new Date().toISOString(),
-          updated_at: data.updated_at || new Date().toISOString(),
-        });
-      } catch (e) {
-        // Non-fatal
       }
 
       router.push(`/transactions/${data.id}`);

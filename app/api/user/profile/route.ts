@@ -14,16 +14,23 @@ export async function GET(req: Request) {
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!supabaseUrl || !serviceKey) {
-      return NextResponse.json({ profile: null, source: 'no_config' });
+      return NextResponse.json(
+        { error: 'Supabase service role configuration is missing on the server' },
+        { status: 500 }
+      );
     }
 
     const adminSupabase = createClient(supabaseUrl, serviceKey);
 
-    const { data: profile } = await adminSupabase
+    const { data: profile, error } = await adminSupabase
       .from('profiles')
       .select('id, email, full_name, phone_number, role, real_bank_name, real_account_number, real_account_name')
       .eq('id', userId)
       .single();
+
+    if (error || !profile) {
+      return NextResponse.json({ error: error?.message || 'Profile not found' }, { status: 404 });
+    }
 
     return NextResponse.json({ profile, source: 'supabase' });
   } catch (err: any) {
@@ -43,22 +50,33 @@ export async function PUT(req: Request) {
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!supabaseUrl || !serviceKey) {
-      return NextResponse.json({ error: 'Server not configured' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Supabase service role configuration is missing on the server' },
+        { status: 500 }
+      );
     }
 
     const adminSupabase = createClient(supabaseUrl, serviceKey);
 
     const { data: updated, error } = await adminSupabase
       .from('profiles')
-      .update({ ...data, updated_at: new Date().toISOString() })
-      .eq('id', userId)
+      .upsert(
+        {
+          id: userId,
+          ...data,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' }
+      )
       .select()
       .single();
 
-    if (error) throw error;
+    if (error || !updated) {
+      return NextResponse.json({ error: error?.message || 'Profile update failed' }, { status: 500 });
+    }
 
     return NextResponse.json({ profile: updated, source: 'supabase' });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err.message || 'Profile update failed' }, { status: 500 });
   }
 }

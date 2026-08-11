@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { mockStore } from '@/lib/supabase/mock-store';
 
 export async function GET(
   req: Request,
@@ -16,35 +15,25 @@ export async function GET(
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (supabaseUrl && serviceKey) {
-      const adminSupabase = createClient(supabaseUrl, serviceKey);
-      const { data: escrow } = await adminSupabase
-        .from('escrow_transactions')
-        .select('*')
-        .eq('id', id)
-        .single();
-
-      if (escrow) {
-        return NextResponse.json(escrow);
-      }
+    if (!supabaseUrl || !serviceKey) {
+      return NextResponse.json({ error: 'Supabase server configuration missing' }, { status: 500 });
     }
 
-    // Fallback: search in mockStore
-    const escrow = mockStore.getEscrowById(id);
-    if (escrow) {
-      return NextResponse.json(escrow);
-    }
-  } catch (e) {
-    // Fallback to mockStore
-  }
+    const adminSupabase = createClient(supabaseUrl, serviceKey);
+    const { data: escrow, error } = await adminSupabase
+      .from('escrow_transactions')
+      .select('*')
+      .eq('id', id)
+      .single();
 
-  const resolvedParams = await params;
-  const escrow = mockStore.getEscrowById(resolvedParams.id);
-  if (escrow) {
+    if (error || !escrow) {
+      return NextResponse.json({ error: error?.message || 'Escrow transaction not found' }, { status: 404 });
+    }
+
     return NextResponse.json(escrow);
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Error fetching transaction' }, { status: 500 });
   }
-
-  return NextResponse.json({ error: 'Escrow transaction not found' }, { status: 404 });
 }
 
 export async function PUT(
@@ -70,44 +59,40 @@ export async function PUT(
     const adminSupabase = createClient(supabaseUrl, serviceKey);
 
     // 1. Fetch current transaction details from Supabase
-    let { data: escrow } = await adminSupabase
+    const { data: escrow, error: fetchErr } = await adminSupabase
       .from('escrow_transactions')
       .select('*')
       .eq('id', id)
       .single();
 
-    // Fallback to mockStore if not found in Supabase
-    if (!escrow) {
-      const local = mockStore.getEscrowById(id);
-      if (local) escrow = local as any;
-    }
-
-    if (!escrow) {
-      return NextResponse.json({ error: 'Escrow transaction not found' }, { status: 404 });
+    if (fetchErr || !escrow) {
+      return NextResponse.json({ error: fetchErr?.message || 'Escrow transaction not found' }, { status: 404 });
     }
 
     // ── ACTION 1: Seller Marks Goods / Services Sent ──
     if (action === 'mark_goods_sent') {
       const newStatus = 'goods_sent';
 
-      // Update Supabase
-      await adminSupabase
+      const { error: updateErr } = await adminSupabase
         .from('escrow_transactions')
         .update({ status: newStatus, updated_at: new Date().toISOString() })
         .eq('id', id);
 
-      // Notify Buyer
-      await adminSupabase.from('notifications').insert({
-        user_id: escrow.buyer_id,
-        title: 'Goods / Service Marked Sent',
-        message: `${escrow.seller_name || 'Seller'} marked "${escrow.title}" as delivered. Please inspect and release funds.`,
-        type: 'goods_sent',
-        is_read: false,
-        link_url: `/transactions/${id}`,
-      });
+      if (updateErr) {
+        return NextResponse.json({ error: updateErr.message }, { status: 500 });
+      }
 
-      // Sync local mockStore
-      try { mockStore.updateEscrowStatus(id, 'goods_sent', userId); } catch (e) {}
+      // Notify Buyer
+      try {
+        await adminSupabase.from('notifications').insert({
+          user_id: escrow.buyer_id,
+          title: 'Goods / Service Marked Sent',
+          message: `${escrow.seller_name || 'Seller'} marked "${escrow.title}" as delivered. Please inspect and release funds.`,
+          type: 'goods_sent',
+          is_read: false,
+          link_url: `/transactions/${id}`,
+        });
+      } catch (e) {}
 
       return NextResponse.json({ success: true, status: 'goods_sent', message: 'Marked as delivered.' });
     }
@@ -120,8 +105,8 @@ export async function PUT(
 
       const releaseAmount = Number(escrow.amount || 0);
 
-      // 1. Update escrow status to completed
-      await adminSupabase
+      // 1. Update escrow status to completed in Supabase
+      const { error: completeErr } = await adminSupabase
         .from('escrow_transactions')
         .update({
           status: 'completed',
@@ -130,13 +115,17 @@ export async function PUT(
         })
         .eq('id', id);
 
-      // 2. Credit Seller's wallet in Supabase
+      if (completeErr) {
+        return NextResponse.json({ error: completeErr.message }, { status: 500 });
+      }
+
+      // 2. Credit Seller's wallet directly in Supabase
       if (escrow.seller_id && releaseAmount > 0) {
         const { data: sellerWallet } = await adminSupabase
           .from('wallets')
           .select('balance')
           .eq('user_id', escrow.seller_id)
-          .single();
+          .maybeSingle();
 
         const currentBal = sellerWallet ? Number(sellerWallet.balance || 0) : 0;
         const newBal = currentBal + releaseAmount;
@@ -160,18 +149,17 @@ export async function PUT(
         }
 
         // Notify Seller
-        await adminSupabase.from('notifications').insert({
-          user_id: escrow.seller_id,
-          title: 'Escrow Funds Released!',
-          message: `₦${releaseAmount.toLocaleString()} released from escrow for "${escrow.title}" into your wallet balance.`,
-          type: 'funds_released',
-          is_read: false,
-          link_url: `/transactions/${id}`,
-        });
+        try {
+          await adminSupabase.from('notifications').insert({
+            user_id: escrow.seller_id,
+            title: 'Escrow Funds Released!',
+            message: `₦${releaseAmount.toLocaleString()} released from escrow for "${escrow.title}" into your wallet balance.`,
+            type: 'funds_released',
+            is_read: false,
+            link_url: `/transactions/${id}`,
+          });
+        } catch (e) {}
       }
-
-      // Sync local mockStore
-      try { mockStore.updateEscrowStatus(id, 'completed', userId); } catch (e) {}
 
       return NextResponse.json({
         success: true,
